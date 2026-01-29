@@ -1,0 +1,217 @@
+{
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://morph.so/contracts/terraform_bootstrap_contract_v1.schema.json",
+    "title": "Sim-AWS Terraform Bootstrap Contract v1",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "version",
+      "bundle_transport_default",
+      "env_runner",
+      "api"
+    ],
+    "properties": {
+      "version": {
+        "type": "string",
+        "const": "v1"
+      },
+      "bundle_transport_default": {
+        "type": "string",
+        "const": "zip",
+        "description": "MVP transport for Terraform bundles."
+      },
+      "env_runner": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "run_root_dir",
+          "markers",
+          "artifacts"
+        ],
+        "properties": {
+          "run_root_dir": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Directory on the env instance where terraform runs are created."
+          },
+          "markers": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ready",
+              "failed"
+            ],
+            "properties": {
+              "ready": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Marker file name or relative path created on successful completion."
+              },
+              "failed": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Marker file name or relative path created on failed completion."
+              }
+            }
+          },
+          "artifacts": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "outputs_json",
+              "apply_log",
+              "exit_code",
+              "meta_json"
+            ],
+            "properties": {
+              "outputs_json": {
+                "type": "string",
+                "minLength": 1,
+                "description": "File name or relative path containing `terraform output -json`."
+              },
+              "apply_log": {
+                "type": "string",
+                "minLength": 1,
+                "description": "File name or relative path containing combined init/apply logs."
+              },
+              "exit_code": {
+                "type": "string",
+                "minLength": 1,
+                "description": "File name or relative path containing the terraform process exit code."
+              },
+              "meta_json": {
+                "type": "string",
+                "minLength": 1,
+                "description": "File name or relative path containing structured metadata (timestamps, versions, etc)."
+              }
+            }
+          }
+        }
+      },
+      "api": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "public_endpoints",
+          "internal_endpoints"
+        ],
+        "properties": {
+          "public_endpoints": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "method",
+                "path",
+                "description"
+              ],
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "POST",
+                    "GET"
+                  ]
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          "internal_endpoints": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "method",
+                "path",
+                "description"
+              ],
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "POST",
+                    "GET"
+                  ]
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      },
+      "notes": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "example": {
+    "version": "v1",
+    "bundle_transport_default": "zip",
+    "env_runner": {
+      "run_root_dir": "/var/lib/simaws/terraform/runs",
+      "markers": {
+        "ready": "READY",
+        "failed": "FAILED"
+      },
+      "artifacts": {
+        "outputs_json": "outputs.json",
+        "apply_log": "apply.log",
+        "exit_code": "exit_code",
+        "meta_json": "meta.json"
+      }
+    },
+    "api": {
+      "public_endpoints": [
+        {
+          "method": "POST",
+          "path": "/v1/terraform/bundles",
+          "description": "Upload a Terraform bundle (zip) and receive a bundle_id for later bootstrap."
+        },
+        {
+          "method": "POST",
+          "path": "/v1/env/{env_id}:bootstrap-terraform",
+          "description": "Trigger terraform init/apply inside the environment using a previously uploaded bundle."
+        }
+      ],
+      "internal_endpoints": [
+        {
+          "method": "GET",
+          "path": "/internal/v1/terraform/bundles/{bundle_id}:download",
+          "description": "Env instance downloads the bundle zip (service-authenticated, no user API key in payload)."
+        },
+        {
+          "method": "POST",
+          "path": "/internal/v1/terraform/runs/{bootstrap_id}:upload-artifacts",
+          "description": "Env instance uploads READY/FAILED markers and outputs.json/apply.log/exit_code/meta.json."
+        }
+      ]
+    },
+    "notes": [
+      "MVP: bundle_transport is zip; future sources (git ref, inline) can be added without breaking v1 by extending the service request shape.",
+      "Env runner writes READY on success or FAILED on failure, plus outputs.json/apply.log/exit_code/meta.json in the run directory."
+    ]
+  }
+}
