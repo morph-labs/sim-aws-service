@@ -1,0 +1,231 @@
+{
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://morph.so/contracts/connect_bundle_v1.schema.json",
+    "title": "Sim-AWS Connect Bundle v1",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "version",
+      "env_id",
+      "instance_id",
+      "tunnel_ws_url",
+      "wg",
+      "dns",
+      "tls",
+      "aws"
+    ],
+    "properties": {
+      "version": {
+        "type": "string",
+        "const": "v1",
+        "description": "Contract version."
+      },
+      "env_id": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Sim-AWS environment id (e.g. awsenv_...)."
+      },
+      "instance_id": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Morph instance id backing this environment (e.g. morphvm_...)."
+      },
+      "tunnel_ws_url": {
+        "type": "string",
+        "minLength": 1,
+        "description": "WebSocket URL to reach the instance tunnel HTTP service (wss://...)."
+      },
+      "wg": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "client_address",
+          "client_private_key",
+          "server_public_key",
+          "allowed_ips",
+          "endpoint_host",
+          "endpoint_port",
+          "mtu",
+          "persistent_keepalive"
+        ],
+        "properties": {
+          "client_address": {
+            "type": "string",
+            "minLength": 1,
+            "description": "WireGuard client address with CIDR suffix (e.g. 10.250.X.100/32)."
+          },
+          "client_private_key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "WireGuard client private key (SENSITIVE)."
+          },
+          "server_public_key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "WireGuard server public key."
+          },
+          "allowed_ips": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "AllowedIPs to route over WireGuard (typically env CIDR)."
+          },
+          "endpoint_host": {
+            "type": "string",
+            "minLength": 1,
+            "description": "WireGuard endpoint host as seen by the client (typically localhost when UDP is tunneled)."
+          },
+          "endpoint_port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "WireGuard endpoint UDP port as seen by the client (typically 51820 when UDP is tunneled)."
+          },
+          "mtu": {
+            "type": "integer",
+            "minimum": 576,
+            "maximum": 9000,
+            "description": "WireGuard interface MTU."
+          },
+          "persistent_keepalive": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "WireGuard PersistentKeepalive in seconds."
+          }
+        }
+      },
+      "dns": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "nameserver"
+        ],
+        "properties": {
+          "nameserver": {
+            "type": "string",
+            "minLength": 1,
+            "description": "DNS server IP to use inside connector (typically env dns_ip)."
+          }
+        }
+      },
+      "tls": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ca_cert_pem",
+          "ca_fingerprint_sha256"
+        ],
+        "properties": {
+          "ca_cert_pem": {
+            "type": "string",
+            "minLength": 1,
+            "description": "CA certificate in PEM format."
+          },
+          "ca_fingerprint_sha256": {
+            "type": "string",
+            "minLength": 1,
+            "description": "SHA-256 fingerprint of CA cert, hex or base64; used for pinning/verification."
+          }
+        }
+      },
+      "aws": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "gateway_ip",
+          "regions"
+        ],
+        "properties": {
+          "gateway_ip": {
+            "type": "string",
+            "minLength": 1,
+            "description": "LocalStack HTTPS listener IP inside env CIDR (all AWS domains resolve here)."
+          },
+          "regions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Enabled AWS regions for the environment."
+          }
+        }
+      },
+      "auth": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Optional: how the connector should authenticate to the instance HTTP service gateway for the tunnel.",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "morph_api_key_bearer"
+            ]
+          },
+          "header_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "header_value_template": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Template that the connector expands at runtime; MUST NOT embed secrets in the bundle."
+          }
+        }
+      },
+      "notes": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "example": {
+    "version": "v1",
+    "env_id": "awsenv_01HTEXAMPLE0ABCDEF1234567",
+    "instance_id": "morphvm_01HTEXAMPLE0ABCDEF1234567",
+    "tunnel_ws_url": "wss://tunnel-morphvm_01HTEXAMPLE0ABCDEF1234567.http.cloud.morph.so",
+    "wg": {
+      "client_address": "10.250.42.100/32",
+      "client_private_key": "<WG_CLIENT_PRIVATE_KEY_BASE64>",
+      "server_public_key": "<WG_SERVER_PUBLIC_KEY_BASE64>",
+      "allowed_ips": [
+        "10.250.42.0/24"
+      ],
+      "endpoint_host": "127.0.0.1",
+      "endpoint_port": 51820,
+      "mtu": 1280,
+      "persistent_keepalive": 25
+    },
+    "dns": {
+      "nameserver": "10.250.42.1"
+    },
+    "tls": {
+      "ca_cert_pem": "-----BEGIN CERTIFICATE-----\n<BASE64>\n-----END CERTIFICATE-----\n",
+      "ca_fingerprint_sha256": "<SHA256_FINGERPRINT_HEX_OR_BASE64>"
+    },
+    "aws": {
+      "gateway_ip": "10.250.42.2",
+      "regions": [
+        "us-east-1",
+        "us-west-2"
+      ]
+    },
+    "auth": {
+      "mode": "morph_api_key_bearer",
+      "header_name": "Authorization",
+      "header_value_template": "Bearer ${MORPH_API_KEY}"
+    },
+    "notes": [
+      "Do NOT embed MORPH_API_KEY in the connect bundle; provide it out-of-band (e.g., env var at runtime).",
+      "The connect bundle is sensitive: it contains a WireGuard private key."
+    ]
+  }
+}
