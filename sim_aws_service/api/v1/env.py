@@ -434,18 +434,38 @@ async def connect_env(
     env_id: str,
     caller: Annotated[CallerContext, Depends(get_caller)],
     db: Annotated[Database, Depends(get_db)],
+    morph: Annotated[MorphClient, Depends(get_morph_client)],
 ) -> ConnectBundle:
     env = _get_env_row(db, env_id=env_id, tenant_id=caller.tenant_id)
     secrets_row = db.fetchone("SELECT * FROM env_secrets WHERE env_id = ?;", (env_id,))
     if secrets_row is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="missing env secrets")
 
+    tunnel_ws_url = env["tunnel_ws_url"]
+    try:
+        tunnel_ws_url = await morph.ensure_http_service_tunnel(
+            auth_header=caller.morph_authorization_header,
+            instance_id=env["instance_id"],
+            service_name="tunnel",
+            auth_mode=None,
+            wake_on_http=True,
+        )
+        healthy = await morph.ensure_env_runtime_healthy(auth_header=caller.morph_authorization_header, instance_id=env["instance_id"])
+        if tunnel_ws_url != env["tunnel_ws_url"]:
+            db.execute(
+                "UPDATE envs SET tunnel_ws_url = ?, updated_at = ? WHERE env_id = ?;",
+                (tunnel_ws_url, _now(), env_id),
+            )
+        _ = healthy
+    except Exception:
+        tunnel_ws_url = env["tunnel_ws_url"]
+
     wg_allowed_ips = json.loads(secrets_row["wg_allowed_ips_json"])
     return ConnectBundle(
         version="v1",
         env_id=env["env_id"],
         instance_id=env["instance_id"],
-        tunnel_ws_url=env["tunnel_ws_url"],
+        tunnel_ws_url=tunnel_ws_url,
         wg={
             "client_address": secrets_row["wg_client_address"],
             "client_private_key": secrets_row["wg_client_private_key"],
