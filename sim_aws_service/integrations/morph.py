@@ -539,6 +539,14 @@ class MorphClient:
         if auth_mode is not None:
             payload["auth_mode"] = auth_mode
         async with self._client() as client:
+            # Ensure the auth_mode takes effect even if the service already exists.
+            r = await client.delete(
+                f"/instance/{instance_id}/http/{service_name}",
+                headers=self._headers(auth_header),
+            )
+            if r.status_code not in (200, 204, 404):
+                r.raise_for_status()
+
             r = await client.post(
                 f"/instance/{instance_id}/http",
                 headers=self._headers(auth_header),
