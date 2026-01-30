@@ -114,7 +114,8 @@ async def create_env(
 
     cidr, dns_ip, aws_gateway_ip, wg_client_address = _allocate_cidr(db)
 
-    effective_ttl = body.ttl_seconds if body.ttl_seconds is not None else int(settings.default_env_ttl_seconds)
+    effective_ttl = body.ttl_seconds if body.ttl_seconds is not None else settings.default_env_ttl_seconds
+    ttl_action = "pause" if effective_ttl is not None else None
 
     try:
         instance = await morph.create_instance(
@@ -123,7 +124,7 @@ async def create_env(
             metadata=body.metadata,
             ttl_seconds=effective_ttl,
             env_id=env_id,
-            ttl_action="pause",
+            ttl_action=ttl_action,
         )
         tunnel_ws_url = await morph.ensure_http_service_tunnel(
             auth_header=caller.morph_authorization_header,
