@@ -14,6 +14,7 @@ Required/important env vars:
 - `SIM_AWS_DB_URL` (optional): state DB (default: `sqlite:///./simaws.db`).
 - `SIM_AWS_TUNNEL_PORT` (optional): port for the instance tunnel listener (default: `8081`).
 - `SIM_AWS_MORPH_EXEC_TIMEOUT_S` (optional): Morph `/instance/{id}/exec` timeout seconds (default: `1200`).
+- `SIM_AWS_DEFAULT_TTL_SECONDS` (optional): default TTL applied when the client does not specify `--ttl-seconds`. Set `0` or leave unset to disable TTL (run until stopped).
 
 ## Tunnel auth mode
 

@@ -418,6 +418,44 @@ class MorphClient:
             os.makedirs(os.path.dirname(config_path), exist_ok=True)
             log_path = os.path.join(state_dir, "env-runtime-supervisor.log")
 
+            # Configure LocalStack to emit AWS-style URLs (no :4566 and no localhost.localstack.cloud hostnames),
+            # so returned QueueUrls/ARNS are reachable through the in-tunnel DNS + gateway.
+            #
+            # This is best-effort because cloudsim may use different compose layouts; writing a `.env` is the
+            # lowest-friction way to influence docker-compose without modifying the base snapshot.
+            if cloudsim_root and os.path.isdir(cloudsim_root):
+                env_path = os.path.join(cloudsim_root, ".env")
+                desired = {
+                    # Common LocalStack knobs:
+                    "HOSTNAME_EXTERNAL": "amazonaws.com",
+                    "EDGE_PORT": "443",
+                    # Variants across LocalStack versions:
+                    "LOCALSTACK_HOST": "amazonaws.com",
+                    "LOCALSTACK_EDGE_PORT": "443",
+                    "LOCALSTACK_HOSTNAME": "amazonaws.com",
+                }
+
+                existing: dict[str, str] = {}
+                if os.path.isfile(env_path):
+                    try:
+                        for raw in open(env_path, "r", encoding="utf-8", errors="replace").read().splitlines():
+                            line = raw.strip()
+                            if not line or line.startswith("#") or "=" not in line:
+                                continue
+                            k, v = line.split("=", 1)
+                            existing[k.strip()] = v.strip()
+                    except Exception:
+                        existing = {}
+
+                changed = False
+                for k, v in desired.items():
+                    if existing.get(k) != v:
+                        existing[k] = v
+                        changed = True
+                if changed:
+                    lines = [f"{k}={existing[k]}" for k in sorted(existing.keys())]
+                    open(env_path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+
             existing_cfg = {}
             if os.path.isfile(config_path):
                 try:
@@ -478,9 +516,48 @@ class MorphClient:
                 _pkill_f(SUPERVISOR_NAME)
                 _pkill_f(WS_UDP_TUNNEL_NAME)
                 _pkill_f(WSTUNNEL_NAME)
+                _pkill_f("env-runtime-watchdog.sh")
                 time.sleep(1)
                 # Detach the supervisor so it survives the /instance/exec lifecycle.
                 cmd = f"nohup {shlex.quote(sup)} >>{shlex.quote(log_path)} 2>&1 &"
+                subprocess.run(["bash", "-lc", cmd], env=env, cwd=cloudsim_root, check=True)
+
+                # Long-lived watchdog: restart the supervisor if health checks fail (or if services go unresponsive).
+                watchdog_path = os.path.join(state_dir, "env-runtime-watchdog.sh")
+                watchdog_log = os.path.join(state_dir, "env-runtime-watchdog.log")
+                health = os.path.join(cloudsim_root, "bin", HEALTH_NAME)
+                open(watchdog_path, "w", encoding="utf-8").write(
+                    "\\n".join(
+                        [
+                            "#!/usr/bin/env bash",
+                            "set -euo pipefail",
+                            "CLOUDSIM_STATE_DIR=\"${CLOUDSIM_STATE_DIR:-/var/lib/cloudsim}\"",
+                            "ENV_RUNTIME_CONFIG=\"${ENV_RUNTIME_CONFIG:-/etc/cloudsim/env_runtime_config.json}\"",
+                            f"sup={shlex.quote(sup)}",
+                            f"health={shlex.quote(health)}",
+                            "while true; do",
+                            "  if [[ -x \"$health\" ]]; then",
+                            "    if CLOUDSIM_STATE_DIR=\"$CLOUDSIM_STATE_DIR\" ENV_RUNTIME_CONFIG=\"$ENV_RUNTIME_CONFIG\" \"$health\" >/dev/null 2>&1; then",
+                            "      sleep 10",
+                            "      continue",
+                            "    fi",
+                            "  fi",
+                            "  pkill -f env-runtime-supervisor\\.sh >/dev/null 2>&1 || true",
+                            "  pkill -f ws_udp_tunnel\\.py >/dev/null 2>&1 || true",
+                            "  pkill -f wstunnel >/dev/null 2>&1 || true",
+                            "  sleep 1",
+                            "  nohup \"$sup\" >>\"$CLOUDSIM_STATE_DIR/env-runtime-supervisor.log\" 2>&1 &",
+                            "  sleep 5",
+                            "done",
+                            "",
+                        ]
+                    )
+                )
+                try:
+                    os.chmod(watchdog_path, 0o755)
+                except Exception:
+                    pass
+                cmd = f"nohup {shlex.quote(watchdog_path)} >>{shlex.quote(watchdog_log)} 2>&1 &"
                 subprocess.run(["bash", "-lc", cmd], env=env, cwd=cloudsim_root, check=True)
 
             health = os.path.join(cloudsim_root, "bin", HEALTH_NAME) if cloudsim_root else None
