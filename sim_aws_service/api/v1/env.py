@@ -127,7 +127,7 @@ async def create_env(
             auth_header=caller.morph_authorization_header,
             instance_id=instance.instance_id,
             service_name="tunnel",
-            auth_mode="api_key",
+            auth_mode=None,
             wake_on_http=True,
         )
         provision = await morph.provision_env_runtime(
@@ -358,7 +358,7 @@ async def restore_env(
             auth_header=caller.morph_authorization_header,
             instance_id=new_instance.instance_id,
             service_name="tunnel",
-            auth_mode="api_key",
+            auth_mode=None,
             wake_on_http=True,
         )
     except Exception as e:

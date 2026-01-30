@@ -15,6 +15,12 @@ Required/important env vars:
 - `SIM_AWS_TUNNEL_PORT` (optional): port for the instance tunnel listener (default: `8081`).
 - `SIM_AWS_MORPH_EXEC_TIMEOUT_S` (optional): Morph `/instance/{id}/exec` timeout seconds (default: `1200`).
 
+## Tunnel auth mode
+
+This branch exposes the per-environment instance HTTP service `tunnel` **without auth** (equivalent to `auth_mode=none`) to avoid connector authorization issues during early rollout.
+
+Security note: this means anyone who can guess the tunnel URL can connect to the environment tunnel. Re-enable auth before broader rollout.
+
 ## Deploy (recommended)
 
 ### 0) Register the service name (one-time)
