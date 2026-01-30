@@ -15,7 +15,30 @@ Required/important env vars:
 - `SIM_AWS_TUNNEL_PORT` (optional): port for the instance tunnel listener (default: `8081`).
 - `SIM_AWS_MORPH_EXEC_TIMEOUT_S` (optional): Morph `/instance/{id}/exec` timeout seconds (default: `1200`).
 
+## Tunnel auth mode
+
+This branch exposes the per-environment instance HTTP service `tunnel` **without auth** (equivalent to `auth_mode=none`) to avoid connector authorization issues during early rollout.
+
+Security note: this means anyone who can guess the tunnel URL can connect to the environment tunnel. Re-enable auth before broader rollout.
+
 ## Deploy (recommended)
+
+### 0) Register the service name (one-time)
+
+`<service>.svc.cloud.morph.so` routing requires that the service name exists in the control plane.
+If you have not registered `sim-aws` yet, create it (admin permissions required):
+
+```bash
+morphcloud admin service create sim-aws
+```
+
+If you want quota/resource tracking enabled in the Sim-AWS service, create a service API key and use it as `SERVICES_API_KEY` when deploying:
+
+```bash
+morphcloud admin service create-api-key sim-aws --json
+```
+
+### 1) Deploy the service VM
 
 Use the Morph “service deploy” workflow from `services-sdk` (or its packaged CLI integration):
 
@@ -36,4 +59,3 @@ Once deployed:
 curl -fsS https://sim-aws.svc.cloud.morph.so/healthz
 curl -fsS https://sim-aws.svc.cloud.morph.so/openapi.json | head
 ```
-

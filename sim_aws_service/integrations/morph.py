@@ -532,14 +532,25 @@ class MorphClient:
         auth_header: str,
         instance_id: str,
         service_name: str = "tunnel",
-        auth_mode: str = "api_key",
+        auth_mode: str | None = None,
         wake_on_http: bool = True,
     ) -> str:
+        payload: dict[str, Any] = {"name": service_name, "port": self._tunnel_port}
+        if auth_mode is not None:
+            payload["auth_mode"] = auth_mode
         async with self._client() as client:
+            # Ensure the auth_mode takes effect even if the service already exists.
+            r = await client.delete(
+                f"/instance/{instance_id}/http/{service_name}",
+                headers=self._headers(auth_header),
+            )
+            if r.status_code not in (200, 204, 404):
+                r.raise_for_status()
+
             r = await client.post(
                 f"/instance/{instance_id}/http",
                 headers=self._headers(auth_header),
-                json={"name": service_name, "port": self._tunnel_port, "auth_mode": auth_mode},
+                json=payload,
             )
             r.raise_for_status()
             if wake_on_http:
