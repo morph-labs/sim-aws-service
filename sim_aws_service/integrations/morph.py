@@ -266,6 +266,52 @@ class MorphClient:
             stderr = str(data.get("stderr") or data.get("err") or "")
             return MorphExecResult(exit_code=exit_code, stdout=stdout, stderr=stderr)
 
+    async def env_runtime_health(self, *, auth_header: str, instance_id: str) -> bool:
+        """
+        Best-effort health check for the cloudsim env runtime inside the instance.
+
+        Returns True if healthy or if the health script is not present.
+        """
+        cmd = (
+            "set -euo pipefail; "
+            "CLOUDSIM_STATE_DIR=\"${CLOUDSIM_STATE_DIR:-/var/lib/cloudsim}\"; "
+            "ENV_RUNTIME_CONFIG=\"${ENV_RUNTIME_CONFIG:-/etc/cloudsim/env_runtime_config.json}\"; "
+            "health=/opt/cloudsim/bin/env-runtime-health.sh; "
+            "[ -x \"$health\" ] || exit 0; "
+            "CLOUDSIM_STATE_DIR=\"$CLOUDSIM_STATE_DIR\" ENV_RUNTIME_CONFIG=\"$ENV_RUNTIME_CONFIG\" \"$health\" "
+            ">/dev/null 2>&1"
+        )
+        res = await self.exec(auth_header=auth_header, instance_id=instance_id, command=["bash", "-lc", cmd])
+        return res.exit_code == 0
+
+    async def restart_env_runtime(self, *, auth_header: str, instance_id: str) -> None:
+        """
+        Best-effort restart for the cloudsim env runtime supervisor in the instance.
+        """
+        cmd = (
+            "set -euo pipefail; "
+            "CLOUDSIM_STATE_DIR=\"${CLOUDSIM_STATE_DIR:-/var/lib/cloudsim}\"; "
+            "mkdir -p \"$CLOUDSIM_STATE_DIR\"; "
+            "sup=/opt/cloudsim/bin/env-runtime-supervisor.sh; "
+            "[ -x \"$sup\" ] || exit 0; "
+            "pkill -f env-runtime-supervisor\\.sh >/dev/null 2>&1 || true; "
+            "pkill -f ws_udp_tunnel\\.py >/dev/null 2>&1 || true; "
+            "pkill -f wstunnel >/dev/null 2>&1 || true; "
+            "sleep 1; "
+            "nohup \"$sup\" >>\"$CLOUDSIM_STATE_DIR/env-runtime-supervisor.log\" 2>&1 &"
+        )
+        await self.exec(auth_header=auth_header, instance_id=instance_id, command=["bash", "-lc", cmd])
+
+    async def ensure_env_runtime_healthy(self, *, auth_header: str, instance_id: str) -> bool:
+        """
+        Ensure env runtime is healthy, attempting a restart once if not.
+        """
+        await self.start_instance(auth_header=auth_header, instance_id=instance_id)
+        if await self.env_runtime_health(auth_header=auth_header, instance_id=instance_id):
+            return True
+        await self.restart_env_runtime(auth_header=auth_header, instance_id=instance_id)
+        return await self.env_runtime_health(auth_header=auth_header, instance_id=instance_id)
+
     async def provision_env_runtime(
         self,
         *,

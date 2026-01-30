@@ -37,6 +37,9 @@ def test_morph_client_request_paths_and_restore_url(monkeypatch):
                 },
             )
 
+        if request.method == "DELETE" and request.url.path == "/api/instance/inst_1/http/tunnel":
+            return httpx.Response(404, json={})
+
         if request.method == "POST" and request.url.path == "/api/instance/inst_1/http":
             body = json.loads(request.content.decode("utf-8"))
             assert body == {"name": "tunnel", "port": 8080, "auth_mode": "api_key"}
@@ -49,6 +52,9 @@ def test_morph_client_request_paths_and_restore_url(monkeypatch):
 
         if request.method == "POST" and request.url.path == "/api/instance/inst_1/snapshot":
             return httpx.Response(200, json={"id": "snap_1"})
+
+        if request.method == "GET" and request.url.path == "/api/snapshot/snap_1":
+            return httpx.Response(200, json={"id": "snap_1", "status": "READY"})
 
         if request.method == "POST" and request.url.path == "/api/instance/inst_1/pause":
             return httpx.Response(200, json={})

@@ -92,6 +92,11 @@ def test_snapshot_and_restore_updates_instance_id(client, monkeypatch):
         assert snapshot_id == "morphsnap_abc"
         return type("X", (), {"instance_id": "morphvm_restored"})()
 
+    async def fake_wait_snapshot_ready(*, auth_header: str, snapshot_id: str, **_kwargs):
+        assert auth_header == "Bearer user-morph-key-abc"
+        assert snapshot_id == "morphsnap_abc"
+        return None
+
     async def fake_ensure_http_service_tunnel(*, auth_header: str, instance_id: str, **kwargs):
         assert auth_header == "Bearer user-morph-key-abc"
         assert instance_id in ("morphvm_initial", "morphvm_restored")
@@ -122,6 +127,7 @@ def test_snapshot_and_restore_updates_instance_id(client, monkeypatch):
     monkeypatch.setattr(app.state.morph_client, "create_instance", fake_create_instance)
     monkeypatch.setattr(app.state.morph_client, "snapshot_instance", fake_snapshot_instance)
     monkeypatch.setattr(app.state.morph_client, "create_instance_from_snapshot", fake_create_instance_from_snapshot)
+    monkeypatch.setattr(app.state.morph_client, "wait_snapshot_ready", fake_wait_snapshot_ready)
     monkeypatch.setattr(app.state.morph_client, "ensure_http_service_tunnel", fake_ensure_http_service_tunnel)
     monkeypatch.setattr(app.state.morph_client, "delete_instance", fake_delete_instance)
     monkeypatch.setattr(app.state.morph_client, "provision_env_runtime", fake_provision_env_runtime)
