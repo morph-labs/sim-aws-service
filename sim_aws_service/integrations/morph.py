@@ -581,37 +581,16 @@ class MorphClient:
                 cmd = f"nohup {shlex.quote(watchdog_path)} >>{shlex.quote(watchdog_log)} 2>&1 &"
                 subprocess.run(["bash", "-lc", cmd], env=env, cwd=cloudsim_root, check=True)
 
-            health = os.path.join(cloudsim_root, "bin", HEALTH_NAME) if cloudsim_root else None
-            if health and os.path.isfile(health):
-                env = dict(os.environ)
-                env["CLOUDSIM_STATE_DIR"] = state_dir
-                env["ENV_RUNTIME_CONFIG"] = config_path
-
-                # Give the supervisor time to start tunnel/DNS/LocalStack.
-                deadline_s = 240.0
-                interval_s = 2.0
-                attempts = int(deadline_s // interval_s)
-                last_rc = None
-                last_first = ""
-                for _ in range(attempts):
-                    p = subprocess.run([health], cwd=cloudsim_root, text=True, capture_output=True, env=env, timeout=180)
-                    if p.returncode == 0:
-                        break
-                    last_rc = p.returncode
-                    err_lines = (p.stderr or "").strip().splitlines()
-                    out_lines = (p.stdout or "").strip().splitlines()
-                    last_first = err_lines[0] if err_lines else (out_lines[0] if out_lines else "")
-                    time.sleep(interval_s)
-                else:
-                    sup_tail = ""
-                    try:
-                        if os.path.isfile(log_path):
-                            sup_tail = _run(["bash", "-lc", f"tail -n 40 {shlex.quote(log_path)}"], timeout_s=10).strip()
-                    except Exception:
-                        sup_tail = ""
-                    if sup_tail:
-                        raise RuntimeError(f"env runtime health failed: rc={last_rc} first_line={last_first} supervisor_log_tail={sup_tail[:200]}")
-                    raise RuntimeError(f"env runtime health failed: rc={last_rc} first_line={last_first}")
+            # Do not block env creation on full runtime health.
+            #
+            # The supervisor can take a while to start DNS + LocalStack, and Morph instance exec appears to have a
+            # relatively short server-side time limit. Instead, do a small best-effort wait for cert generation so
+            # clients can trust env TLS, and validate/restart the runtime later on `connect`.
+            ca_hint = os.path.join(state_dir, "ca.crt.pem")
+            for _ in range(20):
+                if os.path.isfile(ca_hint):
+                    break
+                time.sleep(0.5)
 
             ca_candidates = [
                 os.path.join(state_dir, "ca.crt.pem"),
