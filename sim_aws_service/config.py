@@ -9,6 +9,13 @@ class Settings:
     max_envs_per_tenant: int = 3
     # When None, environments run until explicitly stopped/deleted.
     default_env_ttl_seconds: int | None = None
+    # Morph API key used by the sim-aws service itself to own/provision instances.
+    # If empty/missing, the service will refuse to create/modify environments.
+    service_morph_api_key: str = ""
+
+    @property
+    def service_morph_authorization_header(self) -> str:
+        return f"Bearer {self.service_morph_api_key}"
 
 
 def get_settings() -> Settings:
@@ -22,8 +29,17 @@ def get_settings() -> Settings:
         default_env_ttl_seconds = None if parsed <= 0 else parsed
     else:
         default_env_ttl_seconds = Settings.default_env_ttl_seconds
+
+    # Prefer an explicit service key; fall back to MORPH_API_KEY for local dev only.
+    service_morph_api_key = (
+        os.environ.get("SIM_AWS_SERVICE_MORPH_API_KEY")
+        or os.environ.get("SIM_AWS_MORPH_SERVICE_API_KEY")
+        or os.environ.get("MORPH_API_KEY")
+        or ""
+    ).strip()
     return Settings(
         db_url=db_url,
         max_envs_per_tenant=max_envs_per_tenant,
         default_env_ttl_seconds=default_env_ttl_seconds,
+        service_morph_api_key=service_morph_api_key,
     )

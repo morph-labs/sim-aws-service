@@ -78,6 +78,28 @@ def get_services_client(request: Request) -> ServicesSDKClient:
     return request.app.state.services_client
 
 
+def _require_service_morph_key(settings: Settings) -> None:
+    if not settings.service_morph_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="sim-aws-service is missing SIM_AWS_SERVICE_MORPH_API_KEY (service account key) and cannot provision environments",
+        )
+
+
+async def _verify_user_key(*, morph: MorphClient, caller: CallerContext) -> None:
+    try:
+        await morph.verify_user_api_key(auth_header=caller.user_authorization_header)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e)) from None
+
+
+async def _resolve_tenant_id(*, services: ServicesSDKClient, caller: CallerContext) -> str:
+    # In quota-disabled mode, ServicesSDKClient returns the provided tenant_id directly; use a
+    # non-spoofable id derived from the user's API key.
+    actor = await services.ensure_service_user(tenant_id=caller.api_key_hash, auth_header=caller.user_authorization_header)
+    return actor.tenant_id
+
+
 @router.post("", response_model=Environment)
 async def create_env(
     body: EnvCreateRequest,
@@ -88,9 +110,12 @@ async def create_env(
     settings: Annotated[Settings, Depends(get_settings)],
     response: Response,
 ) -> Environment:
+    await _verify_user_key(morph=morph, caller=caller)
+    _require_service_morph_key(settings)
+    tenant_id = await _resolve_tenant_id(services=services, caller=caller)
     existing_count = db.fetchone(
         "SELECT COUNT(*) AS c FROM envs WHERE tenant_id = ? AND deleted_at IS NULL;",
-        (caller.tenant_id,),
+        (tenant_id,),
     )["c"]
 
     env_id = f"awsenv_{uuid.uuid4().hex}"
@@ -101,10 +126,9 @@ async def create_env(
             response.headers["X-SimAWS-Quota-Reason"] = services.quota_blocked_reason
 
     try:
-        await services.ensure_service_user(tenant_id=caller.tenant_id, auth_header=caller.morph_authorization_header)
         await services.enforce_quota(
-            tenant_id=caller.tenant_id,
-            auth_header=caller.morph_authorization_header,
+            tenant_id=tenant_id,
+            auth_header=caller.user_authorization_header,
             env_count=int(existing_count),
             max_envs=settings.max_envs_per_tenant,
             env_id=env_id,
@@ -119,7 +143,7 @@ async def create_env(
 
     try:
         instance = await morph.create_instance(
-            auth_header=caller.morph_authorization_header,
+            auth_header=settings.service_morph_authorization_header,
             name=body.name,
             metadata=body.metadata,
             ttl_seconds=effective_ttl,
@@ -127,14 +151,14 @@ async def create_env(
             ttl_action=ttl_action,
         )
         tunnel_ws_url = await morph.ensure_http_service_tunnel(
-            auth_header=caller.morph_authorization_header,
+            auth_header=settings.service_morph_authorization_header,
             instance_id=instance.instance_id,
             service_name="tunnel",
             auth_mode=None,
             wake_on_http=True,
         )
         provision = await morph.provision_env_runtime(
-            auth_header=caller.morph_authorization_header,
+            auth_header=settings.service_morph_authorization_header,
             instance_id=instance.instance_id,
             env_id=env_id,
             cidr=cidr,
@@ -148,11 +172,11 @@ async def create_env(
     except Exception:
         try:
             if "instance" in locals() and getattr(instance, "instance_id", None):
-                await morph.delete_instance(auth_header=caller.morph_authorization_header, instance_id=instance.instance_id)
+                await morph.delete_instance(auth_header=settings.service_morph_authorization_header, instance_id=instance.instance_id)
         except Exception:
             pass
         try:
-            await services.release_env_resource(auth_header=caller.morph_authorization_header, env_id=env_id)
+            await services.release_env_resource(auth_header=caller.user_authorization_header, env_id=env_id)
         except Exception:
             pass
         raise
@@ -181,9 +205,9 @@ async def create_env(
         """,
         (
             env_id,
-            caller.tenant_id,
-            caller.user_id,
-            caller.org_id,
+            tenant_id,
+            None,
+            None,
             body.name,
             "ready",
             json.dumps(body.regions),
@@ -218,11 +242,11 @@ async def create_env(
             wg_keepalive,
         ),
     )
-    await services.record_env_resource(tenant_id=caller.tenant_id, auth_header=caller.morph_authorization_header, env_id=env_id)
+    await services.record_env_resource(tenant_id=tenant_id, auth_header=caller.user_authorization_header, env_id=env_id)
 
     return Environment(
         env_id=env_id,
-        tenant_id=caller.tenant_id,
+        tenant_id=tenant_id,
         instance_id=instance.instance_id,
         status="ready",
         region_set=body.regions,
@@ -239,14 +263,18 @@ async def create_env(
 async def list_envs(
     caller: Annotated[CallerContext, Depends(get_caller)],
     db: Annotated[Database, Depends(get_db)],
+    morph: Annotated[MorphClient, Depends(get_morph_client)],
+    services: Annotated[ServicesSDKClient, Depends(get_services_client)],
 ) -> list[Environment]:
+    await _verify_user_key(morph=morph, caller=caller)
+    tenant_id = await _resolve_tenant_id(services=services, caller=caller)
     rows = db.fetchall(
         """
         SELECT * FROM envs
         WHERE tenant_id = ? AND deleted_at IS NULL
         ORDER BY created_at DESC;
         """,
-        (caller.tenant_id,),
+        (tenant_id,),
     )
     envs: list[Environment] = []
     for r in rows:
@@ -283,8 +311,12 @@ async def get_env(
     env_id: str,
     caller: Annotated[CallerContext, Depends(get_caller)],
     db: Annotated[Database, Depends(get_db)],
+    morph: Annotated[MorphClient, Depends(get_morph_client)],
+    services: Annotated[ServicesSDKClient, Depends(get_services_client)],
 ) -> Environment:
-    r = _get_env_row(db, env_id=env_id, tenant_id=caller.tenant_id)
+    await _verify_user_key(morph=morph, caller=caller)
+    tenant_id = await _resolve_tenant_id(services=services, caller=caller)
+    r = _get_env_row(db, env_id=env_id, tenant_id=tenant_id)
     return Environment(
         env_id=r["env_id"],
         tenant_id=r["tenant_id"],
@@ -306,11 +338,16 @@ async def start_env(
     caller: Annotated[CallerContext, Depends(get_caller)],
     db: Annotated[Database, Depends(get_db)],
     morph: Annotated[MorphClient, Depends(get_morph_client)],
+    services: Annotated[ServicesSDKClient, Depends(get_services_client)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> Environment:
-    r = _get_env_row(db, env_id=env_id, tenant_id=caller.tenant_id)
-    await morph.start_instance(auth_header=caller.morph_authorization_header, instance_id=r["instance_id"])
+    await _verify_user_key(morph=morph, caller=caller)
+    _require_service_morph_key(settings)
+    tenant_id = await _resolve_tenant_id(services=services, caller=caller)
+    r = _get_env_row(db, env_id=env_id, tenant_id=tenant_id)
+    await morph.start_instance(auth_header=settings.service_morph_authorization_header, instance_id=r["instance_id"])
     db.execute("UPDATE envs SET status = ?, updated_at = ? WHERE env_id = ?;", ("ready", _now(), env_id))
-    return await get_env(env_id, caller, db)
+    return await get_env(env_id, caller, db, morph, services)
 
 
 @router.post("/{env_id}/pause", response_model=Environment)
@@ -319,11 +356,16 @@ async def pause_env(
     caller: Annotated[CallerContext, Depends(get_caller)],
     db: Annotated[Database, Depends(get_db)],
     morph: Annotated[MorphClient, Depends(get_morph_client)],
+    services: Annotated[ServicesSDKClient, Depends(get_services_client)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> Environment:
-    r = _get_env_row(db, env_id=env_id, tenant_id=caller.tenant_id)
-    await morph.pause_instance(auth_header=caller.morph_authorization_header, instance_id=r["instance_id"])
+    await _verify_user_key(morph=morph, caller=caller)
+    _require_service_morph_key(settings)
+    tenant_id = await _resolve_tenant_id(services=services, caller=caller)
+    r = _get_env_row(db, env_id=env_id, tenant_id=tenant_id)
+    await morph.pause_instance(auth_header=settings.service_morph_authorization_header, instance_id=r["instance_id"])
     db.execute("UPDATE envs SET status = ?, updated_at = ? WHERE env_id = ?;", ("paused", _now(), env_id))
-    return await get_env(env_id, caller, db)
+    return await get_env(env_id, caller, db, morph, services)
 
 
 @router.post("/{env_id}/restore", response_model=Environment)
@@ -333,8 +375,13 @@ async def restore_env(
     caller: Annotated[CallerContext, Depends(get_caller)],
     db: Annotated[Database, Depends(get_db)],
     morph: Annotated[MorphClient, Depends(get_morph_client)],
+    services: Annotated[ServicesSDKClient, Depends(get_services_client)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> Environment:
-    env = _get_env_row(db, env_id=env_id, tenant_id=caller.tenant_id)
+    await _verify_user_key(morph=morph, caller=caller)
+    _require_service_morph_key(settings)
+    tenant_id = await _resolve_tenant_id(services=services, caller=caller)
+    env = _get_env_row(db, env_id=env_id, tenant_id=tenant_id)
     secrets_row = db.fetchone("SELECT * FROM env_secrets WHERE env_id = ?;", (env_id,))
     if secrets_row is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="missing env secrets")
@@ -350,15 +397,15 @@ async def restore_env(
 
     old_instance_id = env["instance_id"]
     try:
-        await morph.wait_snapshot_ready(auth_header=caller.morph_authorization_header, snapshot_id=morph_snapshot_id)
+        await morph.wait_snapshot_ready(auth_header=settings.service_morph_authorization_header, snapshot_id=morph_snapshot_id)
         new_instance = await morph.create_instance_from_snapshot(
-            auth_header=caller.morph_authorization_header,
+            auth_header=settings.service_morph_authorization_header,
             snapshot_id=morph_snapshot_id,
             name=env["name"],
             env_id=env_id,
         )
         tunnel_ws_url = await morph.ensure_http_service_tunnel(
-            auth_header=caller.morph_authorization_header,
+            auth_header=settings.service_morph_authorization_header,
             instance_id=new_instance.instance_id,
             service_name="tunnel",
             auth_mode=None,
@@ -376,11 +423,11 @@ async def restore_env(
         ("ready", new_instance.instance_id, tunnel_ws_url, env["ca_cert_pem"], env["ca_fingerprint_sha256"], _now(), env_id),
     )
     try:
-        await morph.delete_instance(auth_header=caller.morph_authorization_header, instance_id=old_instance_id)
+        await morph.delete_instance(auth_header=settings.service_morph_authorization_header, instance_id=old_instance_id)
     except Exception:
         pass
 
-    return await get_env(env_id, caller, db)
+    return await get_env(env_id, caller, db, morph, services)
 
 
 @router.delete("/{env_id}")
@@ -390,11 +437,15 @@ async def delete_env(
     db: Annotated[Database, Depends(get_db)],
     morph: Annotated[MorphClient, Depends(get_morph_client)],
     services: Annotated[ServicesSDKClient, Depends(get_services_client)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> dict[str, str]:
-    r = _get_env_row(db, env_id=env_id, tenant_id=caller.tenant_id)
-    await morph.delete_instance(auth_header=caller.morph_authorization_header, instance_id=r["instance_id"])
+    await _verify_user_key(morph=morph, caller=caller)
+    _require_service_morph_key(settings)
+    tenant_id = await _resolve_tenant_id(services=services, caller=caller)
+    r = _get_env_row(db, env_id=env_id, tenant_id=tenant_id)
+    await morph.delete_instance(auth_header=settings.service_morph_authorization_header, instance_id=r["instance_id"])
     try:
-        await services.release_env_resource(auth_header=caller.morph_authorization_header, env_id=env_id)
+        await services.release_env_resource(auth_header=caller.user_authorization_header, env_id=env_id)
     except Exception:
         pass
     now = _now()
@@ -411,9 +462,14 @@ async def snapshot_env(
     caller: Annotated[CallerContext, Depends(get_caller)],
     db: Annotated[Database, Depends(get_db)],
     morph: Annotated[MorphClient, Depends(get_morph_client)],
+    services: Annotated[ServicesSDKClient, Depends(get_services_client)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> SnapshotResponse:
-    r = _get_env_row(db, env_id=env_id, tenant_id=caller.tenant_id)
-    morph_snapshot_id = await morph.snapshot_instance(auth_header=caller.morph_authorization_header, instance_id=r["instance_id"])
+    await _verify_user_key(morph=morph, caller=caller)
+    _require_service_morph_key(settings)
+    tenant_id = await _resolve_tenant_id(services=services, caller=caller)
+    r = _get_env_row(db, env_id=env_id, tenant_id=tenant_id)
+    morph_snapshot_id = await morph.snapshot_instance(auth_header=settings.service_morph_authorization_header, instance_id=r["instance_id"])
     snapshot_id = f"awssnap_{uuid.uuid4().hex}"
     now = _now()
     db.execute(
@@ -438,8 +494,13 @@ async def connect_env(
     caller: Annotated[CallerContext, Depends(get_caller)],
     db: Annotated[Database, Depends(get_db)],
     morph: Annotated[MorphClient, Depends(get_morph_client)],
+    services: Annotated[ServicesSDKClient, Depends(get_services_client)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> ConnectBundle:
-    env = _get_env_row(db, env_id=env_id, tenant_id=caller.tenant_id)
+    await _verify_user_key(morph=morph, caller=caller)
+    _require_service_morph_key(settings)
+    tenant_id = await _resolve_tenant_id(services=services, caller=caller)
+    env = _get_env_row(db, env_id=env_id, tenant_id=tenant_id)
     secrets_row = db.fetchone("SELECT * FROM env_secrets WHERE env_id = ?;", (env_id,))
     if secrets_row is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="missing env secrets")
@@ -447,13 +508,13 @@ async def connect_env(
     tunnel_ws_url = env["tunnel_ws_url"]
     try:
         tunnel_ws_url = await morph.ensure_http_service_tunnel(
-            auth_header=caller.morph_authorization_header,
+            auth_header=settings.service_morph_authorization_header,
             instance_id=env["instance_id"],
             service_name="tunnel",
             auth_mode=None,
             wake_on_http=True,
         )
-        healthy = await morph.ensure_env_runtime_healthy(auth_header=caller.morph_authorization_header, instance_id=env["instance_id"])
+        healthy = await morph.ensure_env_runtime_healthy(auth_header=settings.service_morph_authorization_header, instance_id=env["instance_id"])
         if tunnel_ws_url != env["tunnel_ws_url"]:
             db.execute(
                 "UPDATE envs SET tunnel_ws_url = ?, updated_at = ? WHERE env_id = ?;",

@@ -30,9 +30,8 @@ uvicorn sim_aws_service.main:app --reload
 
 ## Auth / tenancy
 
-- Caller provides `Authorization: Bearer <MORPH_API_KEY>`.
-- Tenant scope is derived from headers:
-  - `X-Morph-Org-Id` (preferred)
-  - else `X-Morph-User-Id`
+- Caller provides `Authorization: Bearer <PERSONAL_MORPH_API_KEY>`.
+- The service validates the key and uses it for tenant scoping (and optionally quota enforcement).
+- Sim-AWS environments are provisioned under a separate **service account** key set via `SIM_AWS_SERVICE_MORPH_API_KEY`.
 
 In production, those IDs should be resolved/verified via Morph “service APIs” (services-sdk); this repo contains stubs for that integration.

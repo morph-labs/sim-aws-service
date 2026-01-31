@@ -63,6 +63,19 @@ class MorphClient:
             transport=self._transport,
         )
 
+    async def verify_user_api_key(self, *, auth_header: str) -> None:
+        """
+        Verify a caller-provided Morph API key.
+
+        This does NOT authorize any Sim-AWS operation; it only checks the key is valid by calling a
+        lightweight authenticated endpoint.
+        """
+        async with self._client() as client:
+            r = await client.get("/user/api-key", headers=self._headers(auth_header))
+            if r.status_code in (401, 403):
+                raise PermissionError("invalid Morph API key")
+            r.raise_for_status()
+
     async def _get_instance(self, *, auth_header: str, instance_id: str) -> dict[str, Any]:
         async with self._client() as client:
             r = await client.get(f"/instance/{instance_id}", headers=self._headers(auth_header))

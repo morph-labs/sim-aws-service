@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -8,18 +9,16 @@ from fastapi import Header, HTTPException, status
 
 @dataclass(frozen=True)
 class CallerContext:
-    morph_api_key: str
-    morph_authorization_header: str
+    user_api_key: str
+    user_authorization_header: str
     user_id: str | None
     org_id: str | None
 
     @property
-    def tenant_id(self) -> str:
-        if self.org_id:
-            return self.org_id
-        if self.user_id:
-            return self.user_id
-        return "unknown"
+    def api_key_hash(self) -> str:
+        # Stable, non-reversible identifier for the caller (avoid storing raw keys in DB).
+        digest = hashlib.sha256(self.user_api_key.encode("utf-8")).hexdigest()
+        return f"keysha256_{digest}"
 
 
 def _parse_bearer(authorization: str | None) -> str:
@@ -42,10 +41,10 @@ async def get_caller(
     org_id: Annotated[str | None, Header(alias="X-Morph-Org-Id")] = None,
     user_id: Annotated[str | None, Header(alias="X-Morph-User-Id")] = None,
 ) -> CallerContext:
-    morph_api_key = _parse_bearer(authorization)
+    user_api_key = _parse_bearer(authorization)
     return CallerContext(
-        morph_api_key=morph_api_key,
-        morph_authorization_header=f"Bearer {morph_api_key}",
+        user_api_key=user_api_key,
+        user_authorization_header=f"Bearer {user_api_key}",
         user_id=user_id,
         org_id=org_id,
     )
