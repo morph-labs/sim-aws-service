@@ -546,13 +546,10 @@ async def connect_env(
             "ca_fingerprint_sha256": env["ca_fingerprint_sha256"],
         },
         aws={"gateway_ip": env["aws_gateway_ip"], "regions": json.loads(env["regions_json"])},
-        auth={
-            "mode": "morph_api_key_bearer",
-            "header_name": "Authorization",
-            "header_value_template": "Bearer ${MORPH_API_KEY}",
-        },
+        # Tunnel auth is disabled in MVP mode (`auth_mode=none` on the instance HTTP service).
+        # Do not require any Morph API key to use the tunnel.
+        auth=None,
         notes=[
-            "Do NOT embed MORPH_API_KEY in the connect bundle; provide it out-of-band (e.g., env var at runtime).",
             "The connect bundle is sensitive: it contains a WireGuard private key.",
         ],
     )
