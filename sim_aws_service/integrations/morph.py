@@ -130,7 +130,13 @@ class MorphClient:
             await asyncio.sleep(float(poll_s))
 
     def _snapshot_id_from_env(self) -> str:
-        snapshot_id = os.environ.get("SIM_AWS_MORPH_SNAPSHOT_ID") or os.environ.get("SIM_AWS_ENV_SNAPSHOT_ID")
+        snapshot_id = (
+            os.environ.get("SIM_AWS_MORPH_SNAPSHOT_ID")
+            or os.environ.get("SIM_AWS_ENV_SNAPSHOT_ID")
+            # The Morph service deploy tooling only passes through env vars that start with MORPH.
+            # Support a MORPH-prefixed variant so operators can configure the base snapshot at deploy time.
+            or os.environ.get("MORPH_SIM_AWS_SNAPSHOT_ID")
+        )
         return snapshot_id or "snapshot_9m3k3prh"
 
     def _coerce_exit_code(self, data: dict[str, Any]) -> int:
@@ -431,8 +437,8 @@ class MorphClient:
             os.makedirs(os.path.dirname(config_path), exist_ok=True)
             log_path = os.path.join(state_dir, "env-runtime-supervisor.log")
 
-            # Configure LocalStack to emit AWS-style URLs (no :4566 and no localhost.localstack.cloud hostnames),
-            # so returned QueueUrls/ARNS are reachable through the in-tunnel DNS + gateway.
+            # Configure LocalStack to emit LocalStack domain-style URLs (e.g. sqs.<region>.localhost.localstack.cloud:4566),
+            # so returned QueueUrls are stable and consistent with common LocalStack client expectations.
             #
             # This is best-effort because cloudsim may use different compose layouts; writing a `.env` is the
             # lowest-friction way to influence docker-compose without modifying the base snapshot.
@@ -440,12 +446,14 @@ class MorphClient:
                 env_path = os.path.join(cloudsim_root, ".env")
                 desired = {
                     # Common LocalStack knobs:
-                    "HOSTNAME_EXTERNAL": "amazonaws.com",
-                    "EDGE_PORT": "443",
+                    "HOSTNAME_EXTERNAL": "localhost.localstack.cloud",
+                    "EDGE_PORT": "4566",
                     # Variants across LocalStack versions:
-                    "LOCALSTACK_HOST": "amazonaws.com",
-                    "LOCALSTACK_EDGE_PORT": "443",
-                    "LOCALSTACK_HOSTNAME": "amazonaws.com",
+                    "LOCALSTACK_HOST": "localhost.localstack.cloud",
+                    "LOCALSTACK_EDGE_PORT": "4566",
+                    "LOCALSTACK_HOSTNAME": "localhost.localstack.cloud",
+                    # Service-specific URL format:
+                    "SQS_ENDPOINT_STRATEGY": "domain",
                 }
 
                 existing: dict[str, str] = {}

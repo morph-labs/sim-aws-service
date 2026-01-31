@@ -6,9 +6,10 @@ This repo is the **Sim-AWS control-plane** service that should be deployed as a 
 
 Required/important env vars:
 
-- `MORPH_API_KEY` (required): service deploy/admin key (used by Morph service deployment tooling).
-- `SIM_AWS_SERVICE_MORPH_API_KEY` (required): **Sim-AWS service account** Morph API key used to create/own all Sim-AWS instances and snapshots. End users should NOT have this key.
-- `SIM_AWS_MORPH_SNAPSHOT_ID` (recommended): base Morph snapshot to boot each Sim-AWS environment from. Default is `snapshot_9m3k3prh` (from the Magi E2E PASS run).
+- `MORPH_API_KEY` (required): Morph API key used by the Morph service deployment tooling. In the current deployment workflow, this is also the key that will be available inside the running service container.
+  - Recommendation: set this to the **Sim-AWS service account** Morph API key so all Sim-AWS instances/snapshots are owned by the service account.
+- `MORPH_SIM_AWS_SNAPSHOT_ID` (recommended): base Morph snapshot to boot each Sim-AWS environment from. Default is `snapshot_9m3k3prh` (from the Magi E2E PASS run).
+- `SIM_AWS_SERVICE_MORPH_API_KEY` (optional): explicit service account key override. Useful for local dev. Note: the standard `morphcloud service deploy` workflow only passes through `MORPH*` env vars to the container.
 - `MORPH_BASE_URL` (optional): Morph API base (default: `https://cloud.morph.so/api`).
 - `SERVICES_API_KEY` (optional but recommended): enables quota/resource tracking via Morph “service APIs”. If unset, quotas are disabled (service still works; it sets `X-SimAWS-Quota-Mode: quota_disabled`).
 - `SERVICES_BASE_URL` (optional): base URL for services API (default: `https://service.svc.cloud.morph.so/service`).
@@ -27,7 +28,7 @@ Security note: this means anyone who can guess the tunnel URL can connect to the
 
 - End users call `sim-aws-service` using their **personal** Morph API key in `Authorization: Bearer ...`.
 - The service validates that key and uses it for tenant scoping (and optionally quota enforcement).
-- All Morph instances/snapshots created for Sim-AWS are created using `SIM_AWS_SERVICE_MORPH_API_KEY`, so they are owned by the Sim-AWS service account.
+- All Morph instances/snapshots created for Sim-AWS are created using the service’s configured Morph API key, so they are owned by the Sim-AWS service account.
 
 ## Deploy (recommended)
 
