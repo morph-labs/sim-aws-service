@@ -475,7 +475,7 @@ class MorphClient:
                         changed = True
                 if changed:
                     lines = [f"{k}={existing[k]}" for k in sorted(existing.keys())]
-                    open(env_path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+                    open(env_path, "w", encoding="utf-8").write("\\n".join(lines) + "\\n")
 
             existing_cfg = {}
             if os.path.isfile(config_path):
