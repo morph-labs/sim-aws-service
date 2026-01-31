@@ -649,7 +649,7 @@ class MorphClient:
                 )
             )
             """
-        )
+        ).lstrip()
 
         exec_res = await self.exec(auth_header=auth_header, instance_id=instance_id, command=["python3", "-c", py, payload_b64])
         if exec_res.exit_code != 0:
