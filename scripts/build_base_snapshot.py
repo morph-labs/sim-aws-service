@@ -58,6 +58,18 @@ def _coerce_status(data: Any) -> str:
 def _shell(cmd: str) -> str:
     return cmd if cmd.endswith("\n") else cmd + "\n"
 
+def _coerce_exec_exit_code(data: Any) -> int:
+    if isinstance(data, dict):
+        for k in ("exit_code", "code", "returncode"):
+            v = data.get(k)
+            if v is None:
+                continue
+            try:
+                return int(v)
+            except Exception:
+                continue
+    return 0
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Build a Sim-AWS base snapshot (service-account owned).")
@@ -123,6 +135,10 @@ def main() -> int:
         data = _unwrap(r.json() if r.content else {})
         if not isinstance(data, dict):
             data = {}
+        rc = _coerce_exec_exit_code(data)
+        if rc != 0:
+            stderr = str(data.get("stderr") or data.get("err") or "")[:400]
+            raise RuntimeError(f"instance exec failed: instance_id={instance_id} rc={rc} stderr={stderr!r}")
         return data
 
     create = req(
@@ -175,6 +191,12 @@ def main() -> int:
         f"  git clone --depth 1 --branch {shlex.quote(cloudsim_ref)} {shlex.quote(cloudsim_repo)} /opt/cloudsim >/dev/null 2>&1\n"
         "fi\n"
         "chmod +x /opt/cloudsim/bin/env-runtime-supervisor.sh /opt/cloudsim/bin/env-runtime-health.sh || true\n"
+        "test -f /opt/cloudsim/bin/env-runtime-supervisor.sh\n"
+        "test -f /opt/cloudsim/bin/env-runtime-health.sh\n"
+        "test -f /opt/cloudsim/bin/generate-certs.sh\n"
+        "command -v python3 >/dev/null 2>&1\n"
+        "command -v wg >/dev/null 2>&1\n"
+        "command -v wireguard-go >/dev/null 2>&1\n"
         # Pre-pull the LocalStack/CoreDNS images used by the env runtime to reduce first-boot latency.
         "if command -v docker >/dev/null 2>&1; then\n"
         "  docker info >/dev/null 2>&1 || true\n"
