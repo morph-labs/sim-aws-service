@@ -140,8 +140,22 @@ def main() -> int:
     cloudsim_ref = args.cloudsim_ref
     cmd = _shell(
         "set -euo pipefail\n"
-        "if ! command -v git >/dev/null 2>&1; then\n"
-        "  (apt-get update && apt-get install -y git) >/dev/null 2>&1 || true\n"
+        "if command -v apt-get >/dev/null 2>&1; then\n"
+        "  apt-get update >/dev/null 2>&1 || true\n"
+        "  if ! command -v python3 >/dev/null 2>&1; then apt-get install -y python3 >/dev/null 2>&1 || true; fi\n"
+        "  if ! command -v git >/dev/null 2>&1; then apt-get install -y git >/dev/null 2>&1 || true; fi\n"
+        "  if ! command -v jq >/dev/null 2>&1; then apt-get install -y jq >/dev/null 2>&1 || true; fi\n"
+        "  if ! command -v wg >/dev/null 2>&1; then apt-get install -y wireguard-tools >/dev/null 2>&1 || true; fi\n"
+        "  if ! command -v wireguard-go >/dev/null 2>&1; then apt-get install -y wireguard-go >/dev/null 2>&1 || true; fi\n"
+        "fi\n"
+        "if ! command -v docker >/dev/null 2>&1; then\n"
+        "  if command -v curl >/dev/null 2>&1; then\n"
+        "    (curl -fsSL https://get.docker.com | sh) >/dev/null 2>&1 || true\n"
+        "  fi\n"
+        "fi\n"
+        "if command -v systemctl >/dev/null 2>&1; then\n"
+        "  systemctl enable docker >/dev/null 2>&1 || true\n"
+        "  systemctl start docker >/dev/null 2>&1 || true\n"
         "fi\n"
         "mkdir -p /opt\n"
         "if [ -d /opt/cloudsim/.git ]; then\n"
@@ -160,6 +174,7 @@ def main() -> int:
         "chmod +x /opt/cloudsim/bin/env-runtime-supervisor.sh /opt/cloudsim/bin/env-runtime-health.sh || true\n"
         # Pre-pull the LocalStack/CoreDNS images used by the env runtime to reduce first-boot latency.
         "if command -v docker >/dev/null 2>&1; then\n"
+        "  docker info >/dev/null 2>&1 || true\n"
         "  docker pull localstack/localstack:latest >/dev/null 2>&1 || true\n"
         "  docker pull coredns/coredns:1.11.1 >/dev/null 2>&1 || true\n"
         "fi\n"
@@ -182,4 +197,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
